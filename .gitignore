@@ -1,0 +1,10 @@
+# Python System Junk (MUST BE REMOVED)
+__pycache__/
+*.py[cod]
+*$py.class
+.ipynb_checkpoints/
+.DS_Store
+
+# Large Data Files (Do not commit raw datasets)
+*.parquet
+*.csv
