@@ -6,7 +6,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import mean_squared_error
 from arch import arch_model
 import optuna
-from volatility_models import VolatilityLSTM
+from volatility_models import HybridLSTM
 
 torch.manual_seed(42)
 np.random.seed(42)
@@ -62,7 +62,13 @@ def run_optimized_pipeline(file_path="SPY_VIX_daily_clean.parquet", n_trials=10,
         dropout = trial.suggest_float('dropout', 0.15, 0.35)
         lr = trial.suggest_float('lr', 0.001, 0.008)
         
-        model = VolatilityLSTM(input_size=3, hidden_size=hidden_size, num_layers=num_layers, dropout=dropout)
+        model = HybridLSTM(
+            input_size=3, 
+            hidden_size=hidden_size, 
+            num_layers=num_layers, 
+            # dropout=dropout,
+            bottleneck=1 # <-- The Choke Point
+        )
         optimizer = torch.optim.Adam(model.parameters(), lr=lr)
         criterion = AsymmetricVolatilityLoss(penalty_factor=3.0)
         
@@ -109,7 +115,13 @@ def run_optimized_pipeline(file_path="SPY_VIX_daily_clean.parquet", n_trials=10,
         f_X_test_t = torch.tensor(f_X_test, dtype=torch.float32)
         
         torch.manual_seed(42)
-        fold_model = VolatilityLSTM(input_size=3, hidden_size=best['hidden_size'], num_layers=best['num_layers'], dropout=best['dropout'])
+        fold_model = HybridLSTM(
+            input_size=3,
+            hidden_size=best['hidden_size'],
+            num_layers=best['num_layers'],
+            # dropout=best['dropout'],
+            bottleneck=1
+        )
         fold_optimizer = torch.optim.Adam(fold_model.parameters(), lr=best['lr'])
         criterion = AsymmetricVolatilityLoss(penalty_factor=3.0)
         

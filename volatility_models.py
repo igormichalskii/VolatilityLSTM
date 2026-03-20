@@ -1,26 +1,46 @@
 import torch
 import torch.nn as nn
+from autoencoder import SignalPurifier
 
-class VolatilityLSTM(nn.Module):
-    # We bumped the defaults: 3 inputs, 64 memory tracks, 2 stacked layers
-    def __init__(self, input_size=3, hidden_size=64, num_layers=2, dropout=0.2):
-        super(VolatilityLSTM, self).__init__()
-        self.hidden_size = hidden_size
-        self.num_layers = num_layers
+class HybridLSTM(nn.Module):
+    # We add bottleneck = 1 to squeeze the 3 features down to a single pure signal 
+    def __init__(self, input_size = 3, hidden_size = 64, num_layers=2, bottleneck=1):
+        super(HybridLSTM, self).__init__()
 
-        # PyTorch complains if you apply dropout to a 1-layer network, so we handle it dynamically
-        lstm_dropout = dropout if num_layers > 1 else 0.0
-        
-        self.lstm = nn.LSTM(input_size, hidden_size, num_layers, batch_first=True, dropout=lstm_dropout)
-        self.dropout = nn.Dropout(dropout)
+        # 1. The Noise Filter
+        self.purifier = SignalPurifier(input_features=input_size, bottleneck=bottleneck)
+
+        # 2. The Sequence Engine (Now reading ONLY the pure bottleneck signal)
+        self.lstm = nn.LSTM(
+            input_size=bottleneck,
+            hidden_size=hidden_size,
+            num_layers=num_layers,
+            batch_first=True,
+            dropout=0.2
+        )
+
+        # 3. The Final Squeeze
         self.linear = nn.Linear(hidden_size, 1)
 
     def forward(self, x):
-        h0 = torch.zeros(self.num_layers, x.size(0), self.hidden_size).to(x.device)
-        c0 = torch.zeros(self.num_layers, x.size(0), self.hidden_size).to(x.device)
+        # x shape: (Batch, Sequence_Length, Features)
+        batch_size, seq_len, features = x.size()
 
-        out, _ = self.lstm(x, (h0, c0))
+        # We must flatten the sequence to shove it through the linear Autoencoder
+        flat_x = x.view(-1, features)
 
-        # We only care about the very last prediction in the sequence
-        out = self.dropout(out[:, -1, :])
-        return self.linear(out)
+        # Purify the signal (we ignore the reconstructed data for now, we just want the pure alpha)
+        _, latent_alpha = self.purifier(flat_x)
+
+        # Reshape the pure, filtered signal back into a chronological time sequence
+        # Shape becomes: (Batch, Sequence_Length, Bottleneck)
+        clean_sequence = latent_alpha.view(batch_size, seq_len, -1)
+
+        # Feed the noise-free sequence into the LSTM
+        lstm_out, _ = self.lstm(clean_sequence)
+
+        # LSTMs natively understand time, so we safely grab the final day's context
+        final_day = lstm_out[:, -1, :]
+
+        prediction = self.linear(final_day)
+        return prediction
